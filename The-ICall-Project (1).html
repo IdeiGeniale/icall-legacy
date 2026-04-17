@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PeerJS Audio Call with Call Duration & History</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 450px;
+      margin: auto;
+    }
+    input, button, select {
+      padding: 8px;
+      margin: 5px 0;
+      font-size: 16px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #status {
+      margin-top: 10px;
+      font-weight: bold;
+      color: green;
+    }
+    audio {
+      width: 100%;
+      margin-top: 10px;
+      border-radius: 6px;
+      background: #000;
+    }
+    #call-history {
+      margin-top: 20px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    #call-history h3 {
+      margin-bottom: 5px;
+    }
+    #call-history ul {
+      list-style: none;
+      padding-left: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    #call-history li {
+      padding: 6px 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+    }
+    .call-controls {
+      display: flex;
+      gap: 5px;
+      margin: 10px 0;
+    }
+    .call-controls button {
+      flex: 1;
+    }
+    .hidden {
+      display: none !important;
+    }
+    #incoming-call-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      z-index: 1000;
+    }
+    #incoming-call-screen h2 {
+      margin-bottom: 30px;
+      font-size: 24px;
+      text-align: center;
+    }
+    #caller-id {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    #incoming-call-info {
+      font-size: 18px;
+      margin-bottom: 40px;
+      text-align: center;
+      opacity: 0.8;
+    }
+    .incoming-call-buttons {
+      display: flex;
+      gap: 40px;
+      justify-content: center;
+      align-items: center;
+    }
+    .call-action-btn {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .call-action-btn:hover {
+      transform: scale(1.1);
+    }
+    #accept-call-btn {
+      background: #4CAF50;
+      color: white;
+    }
+    #decline-call-btn {
+      background: #f44336;
+      color: white;
+    }
+    .ringing-animation {
+      animation: ring 1s infinite;
+    }
+    @keyframes ring {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+    #missed-calls {
+      margin-top: 20px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    #missed-calls h3 {
+      margin-bottom: 5px;
+      color: #f44336;
+    }
+    #missed-calls ul {
+      list-style: none;
+      padding-left: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    #missed-calls li {
+      padding: 6px 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+      color: #f44336;
+    }
+  </style>
+</head>
+<body>
+  <h2>📞 The Icall Project (Version 1.0.1)</h2>
+  <h3>Call anyone around the world for free! More Updates coming soon.</h3>
+
+  <p><strong>Your Phone ID:</strong> <span id="my-id">Generating...</span></p>
+
+  <label for="other-id">Enter phone ID to call:</label>
+  <input type="text" id="other-id" placeholder="6-digit phone ID" maxlength="6">
+
+  <label for="phonebook">Or select from phonebook:</label>
+  <select id="phonebook">
+    <option value="">-- Phonebook Empty --</option>
+  </select>
+
+  <button id="call-btn">Call</button>
+  <button id="hangup-btn" disabled>Hang Up</button>
+
+  <div id="call-controls" class="hidden call-controls">
+    <button id="toggle-audio-btn">Mute Audio</button>
+    <button id="toggle-mic-btn">Mute Mic</button>
+  </div>
+
+  <h3>Current Call Duration: <span id="call-duration">00:00</span></h3>
+  <h3>Total Time in Calls: <span id="total-call-time">00:00</span></h3>
+
+  <audio id="remoteAudio" autoplay></audio>
+
+  <div id="incoming-call-screen" class="hidden">
+    <h2>📞 Incoming Call</h2>
+    <div id="caller-id" class="ringing-animation">Unknown</div>
+    <div id="incoming-call-info">Touch to answer or decline</div>
+    <div class="incoming-call-buttons">
+      <button id="accept-call-btn" class="call-action-btn">📞</button>
+      <button id="decline-call-btn" class="call-action-btn">📵</button>
+    </div>
+  </div>
+
+  <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" preload="auto"></audio>
+
+  <div id="status"></div>
+
+  <div id="call-history">
+    <h3>Call History</h3>
+    <ul id="history-list">
+      <!-- Filled dynamically -->
+    </ul>
+  </div>
+
+  <div id="missed-calls">
+    <h3>Missed Calls</h3>
+    <ul id="missed-calls-list">
+      <!-- Filled dynamically -->
+    </ul>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+  <script>
+    // Cookie helpers
+    function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+      return null;
+    }
+
+    function setCookie(name, value, days = 365) {
+      const date = new Date();
+      date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+      document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/`;
+    }
+
+    // Utils
+    function generatePhoneId() {
+      return Math.floor(100000 + Math.random() * 900000).toString();
+    }
+
+    function formatSeconds(s) {
+      const min = Math.floor(s / 60).toString().padStart(2, '0');
+      const sec = (s % 60).toString().padStart(2, '0');
+      return `${min}:${sec}`;
+    }
+
+    // LocalStorage keys
+    const PHONEBOOK_KEY = 'phonebook';
+    const CALL_HISTORY_KEY = 'callHistory';
+    const TOTAL_TIME_KEY = 'totalCallTime';
+    const MISSED_CALLS_KEY = 'missedCalls';
+
+    // Phonebook management
+    function saveToPhonebook(id) {
+      if (!id || id.length !== 6) return;
+      try {
+        let pb = JSON.parse(localStorage.getItem(PHONEBOOK_KEY) || '[]');
+        if (!pb.includes(id)) {
+          pb.push(id);
+          localStorage.setItem(PHONEBOOK_KEY, JSON.stringify(pb));
+          updatePhonebook();
+        }
+      } catch (e) {
+        console.error('Error saving to phonebook:', e);
+      }
+    }
+
+    function updatePhonebook() {
+      const pbSelect = document.getElementById('phonebook');
+      if (!pbSelect) return;
+      
+      try {
+        let pb = JSON.parse(localStorage.getItem(PHONEBOOK_KEY) || '[]');
+        pbSelect.innerHTML = pb.length ? '<option value="">-- Select a contact --</option>' : '<option value="">-- Phonebook Empty --</option>';
+        pb.forEach(id => {
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = id;
+          pbSelect.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Error updating phonebook:', e);
+      }
+    }
+
+    // Call History management
+    function addCallHistory(peerId, start, duration) {
+      if (!peerId || !start || duration < 0) return;
+      
+      try {
+        let history = JSON.parse(localStorage.getItem(CALL_HISTORY_KEY) || '[]');
+        history.unshift({ peerId, start, duration });
+        if (history.length > 50) history = history.slice(0, 50);
+        localStorage.setItem(CALL_HISTORY_KEY, JSON.stringify(history));
+        updateCallHistoryUI();
+      } catch (e) {
+        console.error('Error adding call history:', e);
+      }
+    }
+
+    function updateCallHistoryUI() {
+      const ul = document.getElementById('history-list');
+      if (!ul) return;
+      
+      try {
+        let history = JSON.parse(localStorage.getItem(CALL_HISTORY_KEY) || '[]');
+        ul.innerHTML = history.length ? '' : '<li>No calls yet.</li>';
+        history.forEach(call => {
+          const li = document.createElement('li');
+          const startDate = new Date(call.start);
+          li.textContent = `Called ${call.peerId} at ${startDate.toLocaleString()}, duration: ${formatSeconds(call.duration)}`;
+          ul.appendChild(li);
+        });
+      } catch (e) {
+        console.error('Error updating call history UI:', e);
+      }
+    }
+
+    // Missed calls management
+    function addMissedCall(peerId, timestamp) {
+      if (!peerId) return;
+      
+      try {
+        let missedCalls = JSON.parse(localStorage.getItem(MISSED_CALLS_KEY) || '[]');
+        missedCalls.unshift({ peerId, timestamp });
+        if (missedCalls.length > 20) missedCalls = missedCalls.slice(0, 20);
+        localStorage.setItem(MISSED_CALLS_KEY, JSON.stringify(missedCalls));
+        updateMissedCallsUI();
+      } catch (e) {
+        console.error('Error adding missed call:', e);
+      }
+    }
+
+    function updateMissedCallsUI() {
+      const ul = document.getElementById('missed-calls-list');
+      if (!ul) return;
+      
+      try {
+        let missedCalls = JSON.parse(localStorage.getItem(MISSED_CALLS_KEY) || '[]');
+        ul.innerHTML = missedCalls.length ? '' : '<li>No missed calls.</li>';
+        missedCalls.forEach(call => {
+          const li = document.createElement('li');
+          const callDate = new Date(call.timestamp);
+          li.textContent = `Missed call from ${call.peerId} at ${callDate.toLocaleString()}`;
+          ul.appendChild(li);
+        });
+      } catch (e) {
+        console.error('Error updating missed calls UI:', e);
+      }
+    }
+
+    // Total call time
+    function getTotalCallTime() {
+      try {
+        return Number(localStorage.getItem(TOTAL_TIME_KEY) || '0');
+      } catch (e) {
+        console.error('Error getting total call time:', e);
+        return 0;
+      }
+    }
+
+    function addToTotalCallTime(seconds) {
+      if (seconds <= 0) return;
+      
+      try {
+        const current = getTotalCallTime();
+        localStorage.setItem(TOTAL_TIME_KEY, (current + seconds).toString());
+        updateTotalCallTimeUI();
+      } catch (e) {
+        console.error('Error adding to total call time:', e);
+      }
+    }
+
+    function updateTotalCallTimeUI() {
+      const totalTimeSpan = document.getElementById('total-call-time');
+      if (totalTimeSpan) totalTimeSpan.textContent = formatSeconds(getTotalCallTime());
+    }
+
+    // DOM elements
+    const myIdSpan = document.getElementById("my-id");
+    const otherIdInput = document.getElementById("other-id");
+    const phonebookSelect = document.getElementById("phonebook");
+    const callBtn = document.getElementById("call-btn");
+    const hangupBtn = document.getElementById("hangup-btn");
+    const remoteAudio = document.getElementById("remoteAudio");
+    const ringtone = document.getElementById("ringtone");
+    const statusDiv = document.getElementById("status");
+    const callDurationSpan = document.getElementById("call-duration");
+    const callControlsDiv = document.getElementById("call-controls");
+    const toggleAudioBtn = document.getElementById("toggle-audio-btn");
+    const toggleMicBtn = document.getElementById("toggle-mic-btn");
+    const incomingCallScreen = document.getElementById("incoming-call-screen");
+    const callerIdSpan = document.getElementById("caller-id");
+    const acceptCallBtn = document.getElementById("accept-call-btn");
+    const declineCallBtn = document.getElementById("decline-call-btn");
+
+    // Initialize variables with immediate fallback
+    let phoneId = getCookie('peerjs_phone_id');
+    if (!phoneId) {
+      phoneId = generatePhoneId();
+      setCookie('peerjs_phone_id', phoneId);
+      myIdSpan.textContent = phoneId;
+    }
+
+    let peer = null;
+    let currentCall = null;
+    let incomingCall = null;
+    let callStartTime = null;
+    let callTimerInterval = null;
+    let localStream = null;
+    let audioEnabled = true;
+    let micEnabled = true;
+    let isInCall = false;
+
+    function setStatus(txt) {
+      if (statusDiv) statusDiv.textContent = txt;
+    }
+
+    function handleIncomingCall(call) {
+      incomingCall = call;
+      showIncomingCallScreen(call.peer);
+    }
+
+    function showIncomingCallScreen(callerId) {
+      if (callerIdSpan) callerIdSpan.textContent = callerId;
+      if (incomingCallScreen) incomingCallScreen.classList.remove('hidden');
+      if (ringtone) ringtone.play().catch(e => console.log('Ringtone error:', e));
+      setStatus("Incoming call from " + callerId);
+    }
+
+    function hideIncomingCallScreen() {
+      if (incomingCallScreen) incomingCallScreen.classList.add('hidden');
+      if (ringtone) {
+        ringtone.pause();
+        ringtone.currentTime = 0;
+      }
+    }
+
+    function startCallTimer() {
+      callStartTime = Date.now();
+      if (callDurationSpan) callDurationSpan.textContent = "00:00";
+      callTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+        if (callDurationSpan) callDurationSpan.textContent = formatSeconds(elapsed);
+      }, 1000);
+    }
+
+    function stopCallTimer() {
+      if (callTimerInterval) clearInterval(callTimerInterval);
+      if (!callStartTime) return 0;
+      const duration = Math.floor((Date.now() - callStartTime) / 1000);
+      callStartTime = null;
+      if (callDurationSpan) callDurationSpan.textContent = "00:00";
+      return duration;
+    }
+
+    function endCallCleanup() {
+      isInCall = false;
+      if (currentCall) currentCall.close();
+      incomingCall = null;
+      hideIncomingCallScreen();
+      if (remoteAudio) remoteAudio.srcObject = null;
+      if (hangupBtn) hangupBtn.disabled = true;
+      if (callBtn) callBtn.disabled = false;
+      if (callControlsDiv) callControlsDiv.classList.add('hidden');
+      setStatus("Ready");
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      audioEnabled = true;
+      micEnabled = true;
+      if (toggleAudioBtn) toggleAudioBtn.textContent = "Mute Audio";
+      if (toggleMicBtn) toggleMicBtn.textContent = "Mute Mic";
+    }
+
+    function toggleAudio() {
+      audioEnabled = !audioEnabled;
+      if (toggleAudioBtn) toggleAudioBtn.textContent = audioEnabled ? "Mute Audio" : "Unmute Audio";
+      if (remoteAudio) remoteAudio.muted = !audioEnabled;
+    }
+
+    function toggleMic() {
+      if (!localStream) return;
+      micEnabled = !micEnabled;
+      if (toggleMicBtn) toggleMicBtn.textContent = micEnabled ? "Mute Mic" : "Unmute Mic";
+      localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
+    }
+
+    async function makeCall(otherId) {
+      if (!otherId || otherId.length !== 6) return alert("Please enter a valid 6-digit phone ID");
+      if (isInCall) return alert("Already in a call");
+      
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream = stream;
+        const call = peer.call(otherId, stream);
+        if (!call) throw new Error("Failed to initiate call");
+        
+        currentCall = call;
+        isInCall = true;
+        saveToPhonebook(otherId);
+        setStatus("Calling " + otherId + "...");
+        if (hangupBtn) hangupBtn.disabled = false;
+        if (callBtn) callBtn.disabled = true;
+        if (callControlsDiv) callControlsDiv.classList.remove('hidden');
+
+        call.on("stream", remoteStream => {
+          currentCall.remoteStream = remoteStream;
+          if (remoteAudio) remoteAudio.srcObject = remoteStream;
+          setStatus("In call with " + otherId);
+          remoteStream.onaddtrack = () => {
+            if (remoteAudio) remoteAudio.srcObject = remoteStream;
+          };
+        });
+
+        call.on("close", () => {
+          const duration = stopCallTimer();
+          if (duration > 0) {
+            addCallHistory(otherId, Date.now() - duration*1000, duration);
+            addToTotalCallTime(duration);
+          }
+          endCallCleanup();
+        });
+
+        call.on("error", err => {
+          console.error("Call error:", err);
+          const duration = stopCallTimer();
+          if (duration > 0) {
+            addCallHistory(otherId, Date.now() - duration*1000, duration);
+            addToTotalCallTime(duration);
+          }
+          endCallCleanup();
+        });
+
+        startCallTimer();
+      } catch (err) {
+        console.error("Error making call:", err);
+        endCallCleanup();
+      }
+    }
+
+    async function answerCall(call) {
+      if (!call) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream = stream;
+        call.answer(stream);
+        currentCall = call;
+        incomingCall = null;
+        isInCall = true;
+        saveToPhonebook(call.peer);
+        hideIncomingCallScreen();
+        setStatus("In call with " + call.peer);
+        if (hangupBtn) hangupBtn.disabled = false;
+        if (callBtn) callBtn.disabled = true;
+        if (callControlsDiv) callControlsDiv.classList.remove('hidden');
+
+        call.on("stream", remoteStream => {
+          currentCall.remoteStream = remoteStream;
+          if (remoteAudio) remoteAudio.srcObject = remoteStream;
+          remoteStream.onaddtrack = () => {
+            if (remoteAudio) remoteAudio.srcObject = remoteStream;
+          };
+        });
+
+        call.on("close", () => {
+          const duration = stopCallTimer();
+          if (duration > 0) {
+            addCallHistory(call.peer, Date.now() - duration*1000, duration);
+            addToTotalCallTime(duration);
+          }
+          endCallCleanup();
+        });
+
+        call.on("error", err => {
+          console.error("Call error:", err);
+          const duration = stopCallTimer();
+          if (duration > 0) {
+            addCallHistory(call.peer, Date.now() - duration*1000, duration);
+            addToTotalCallTime(duration);
+          }
+          endCallCleanup();
+        });
+
+        startCallTimer();
+      } catch (err) {
+        console.error("Error answering call:", err);
+        hideIncomingCallScreen();
+        setStatus("Ready");
+        incomingCall = null;
+      }
+    }
+
+    function declineCall() {
+      if (incomingCall) {
+        addMissedCall(incomingCall.peer, Date.now());
+        incomingCall.close();
+        incomingCall = null;
+      }
+      hideIncomingCallScreen();
+      setStatus("Call declined");
+    }
+
+    // Initialize PeerJS with proper error handling
+    function initializePeer() {
+      try {
+        peer = new Peer(phoneId);
+        
+        // Show connecting status immediately
+        myIdSpan.textContent = phoneId + " (Connecting...)";
+        setStatus("Connecting to server...");
+
+        peer.on("open", id => {
+          console.log('Peer connected with ID:', id);
+          if (id !== phoneId) {
+            phoneId = id;
+            setCookie('peerjs_phone_id', id);
+          }
+          myIdSpan.textContent = id;
+          updatePhonebook();
+          updateCallHistoryUI();
+          updateMissedCallsUI();
+          updateTotalCallTimeUI();
+          setStatus("Ready");
+        });
+
+        peer.on("error", err => {
+          console.error('Peer error:', err);
+          myIdSpan.textContent = phoneId + " (Offline)";
+          setStatus("Connection error - using fallback ID");
+        });
+
+        peer.on("call", call => {
+          console.log('Incoming call from:', call.peer);
+          if (isInCall) {
+            addMissedCall(call.peer, Date.now());
+            call.close();
+            return;
+          }
+          handleIncomingCall(call);
+        });
+
+        peer.on("disconnected", () => {
+          setStatus("Disconnected - trying to reconnect...");
+          peer.reconnect();
+        });
+
+      } catch (e) {
+        console.error('Error initializing peer:', e);
+        myIdSpan.textContent = phoneId + " (Offline)";
+        setStatus("Error: Could not initialize connection");
+      }
+    }
+
+    // Event listeners
+    callBtn.addEventListener('click', () => {
+      const otherId = otherIdInput.value.trim() || phonebookSelect.value;
+      if (!otherId) return alert("Enter or select a phone ID to call!");
+      makeCall(otherId);
+    });
+
+    hangupBtn.addEventListener('click', () => {
+      if (currentCall) {
+        const duration = stopCallTimer();
+        if (duration > 0 && currentCall.peer) {
+          addCallHistory(currentCall.peer, Date.now() - duration*1000, duration);
+          addToTotalCallTime(duration);
+        }
+        currentCall.close();
+      }
+      endCallCleanup();
+    });
+
+    phonebookSelect.addEventListener('change', () => {
+      otherIdInput.value = phonebookSelect.value;
+    });
+
+    toggleAudioBtn.addEventListener('click', toggleAudio);
+    toggleMicBtn.addEventListener('click', toggleMic);
+    acceptCallBtn.addEventListener('click', () => incomingCall && answerCall(incomingCall));
+    declineCallBtn.addEventListener('click', declineCall);
+
+    remoteAudio.addEventListener('error', () => {
+      if (currentCall?.remoteStream) remoteAudio.srcObject = currentCall.remoteStream;
+    });
+
+    // Initialize the application
+    if (typeof Peer !== 'undefined') {
+      initializePeer();
+    } else {
+      console.error('PeerJS not available');
+      myIdSpan.textContent = phoneId + " (Offline)";
+      setStatus("Error: PeerJS library failed to load");
+    }
+  </script>
+</body>
+</html>
